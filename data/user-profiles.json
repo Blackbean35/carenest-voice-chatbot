@@ -1,0 +1,14 @@
+{
+  "child-001": {
+    "id": "child-001",
+    "birthDate": "2026-05-10",
+    "sex": "female",
+    "underlyingConditions": []
+  },
+  "child-002": {
+    "id": "child-002",
+    "birthDate": "2025-01-15",
+    "sex": "male",
+    "underlyingConditions": ["열성경련 과거력"]
+  }
+}

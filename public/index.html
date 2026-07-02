@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CareNest 실시간 음성 문진</title>
+<link rel="stylesheet"
+  href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+  crossorigin="" />
+
+<style>
+  :root { font-size: 18px; color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; max-width: 760px; margin: 0 auto; padding: 20px; background:#f6f8fb; color:#172033; }
+  h1 { font-size:1.35rem; margin-bottom:6px; }
+  .sub { color:#5b6475; font-size:.87rem; line-height:1.45; }
+  .panel { background:#fff; border:1px solid #e4e8ef; border-radius:16px; padding:14px; margin:16px 0; box-shadow:0 4px 18px rgba(30,50,80,.05); }
+  .row { display:flex; gap:9px; align-items:center; flex-wrap:wrap; }
+  button, select { font:inherit; border-radius:11px; padding:10px 14px; border:1px solid #cfd6e2; background:#fff; }
+  button { cursor:pointer; }
+  #mic { background:#2563eb; border-color:#2563eb; color:#fff; font-weight:700; min-width:125px; }
+  #mic.listening { background:#dc2626; border-color:#dc2626; }
+  #reset { background:#eef1f5; }
+  #location.ready { color:#08783e; border-color:#65b98c; background:#edfff5; }
+  label { font-size:.9rem; }
+  #live { min-height:34px; margin-top:10px; padding:8px 11px; border-radius:10px; background:#f1f5f9; color:#64748b; font-size:.9rem; }
+  #log { display:flex; flex-direction:column; gap:10px; }
+  .bubble { padding:12px 15px; border-radius:15px; max-width:91%; line-height:1.55; box-shadow:0 1px 4px rgba(0,0,0,.06); white-space:pre-wrap; }
+  .u { align-self:flex-end; background:#dbeafe; }
+  .a { align-self:flex-start; background:#fff; font-size:1.03rem; border:1px solid #e5e7eb; }
+  .a.emg { background:#fff1f2; border:2px solid #dc2626; color:#a91414; font-weight:700; }
+  .meta { font-size:.76rem; color:#64748b; margin-top:7px; }
+  .hospitals { width:100%; display:grid; gap:8px; }
+  .hospital { background:#fff; border:1px solid #dce2ec; border-radius:12px; padding:11px 13px; }
+  .hospital a { color:#1d4ed8; font-weight:700; text-decoration:none; }
+  .hospital small { display:block; color:#667085; margin-top:4px; line-height:1.45; }
+  .warning { font-size:.78rem; color:#8a4b08; margin-top:10px; }
+  .consent-backdrop { position:fixed; inset:0; z-index:1000; display:grid; place-items:center; padding:20px; background:rgba(15,23,42,.62); }
+  .consent-backdrop[hidden] { display:none; }
+  .consent-card { width:min(520px, 100%); background:#fff; border-radius:18px; padding:22px; box-shadow:0 24px 70px rgba(0,0,0,.28); }
+  .consent-card h2 { margin:0 0 8px; font-size:1.25rem; }
+  .permission-list { display:grid; gap:10px; margin:16px 0; }
+  .permission-item { padding:11px 13px; border-radius:12px; background:#f5f7fb; }
+  .permission-item strong { display:block; margin-bottom:3px; }
+  .consent-actions { display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; }
+  #consentAccept { color:#fff; background:#2563eb; border-color:#2563eb; font-weight:700; }
+  #consentStatus { min-height:1.4em; margin-top:10px; color:#475569; font-size:.84rem; }
+  .hospital-results { display:grid; gap:10px; width:100%; }
+  .hospital-map { width:100%; height:320px; border:1px solid #dce2ec; border-radius:14px; overflow:hidden; background:#e9eef5; }
+  .map-fallback { display:grid; place-items:center; padding:18px; color:#5f6b7a; text-align:center; }
+
+</style>
+</head>
+<body>
+  <div id="consentModal" class="consent-backdrop" role="dialog" aria-modal="true" aria-labelledby="consentTitle">
+    <section class="consent-card">
+      <h2 id="consentTitle">음성 상담 권한 안내</h2>
+      <div class="sub">상담을 시작하려면 아래 기능에 대한 동의가 필요합니다. 위치는 병원 추천에만 사용하며 저장하지 않습니다.</div>
+      <div class="permission-list">
+        <div class="permission-item"><strong>마이크</strong>증상을 음성으로 인식하기 위해 사용합니다.</div>
+        <div class="permission-item"><strong>현재 위치</strong>진료가 필요할 때 가까운 병원을 지도에 표시하기 위해 사용합니다.</div>
+      </div>
+      <div class="consent-actions">
+        <button id="consentLater" type="button">나중에</button>
+        <button id="consentAccept" type="button">동의하고 시작</button>
+      </div>
+      <div id="consentStatus" aria-live="polite"></div>
+    </section>
+  </div>
+
+  <h1>CareNest 실시간 음성 문진</h1>
+  <div class="sub">말을 마치면 바로 판단을 시작하고, 필요한 정보는 한 번에 하나씩 되묻습니다. 진단 서비스가 아니며 응급 시 119가 우선입니다.</div>
+
+  <section class="panel">
+    <div class="row">
+      <button id="mic">말하기</button>
+      <button id="reset">새 상담</button>
+      <button id="location">위치 사용</button>
+      <label>아이
+        <select id="child">
+          <option value="">미지정</option>
+          <option value="child-001">child-001 (3개월 미만)</option>
+          <option value="child-002" selected>child-002 (열성경련 과거력)</option>
+        </select>
+      </label>
+      <label><input type="checkbox" id="continuous" checked /> 자동 재청취</label>
+    </div>
+    <div id="live">대기 중</div>
+    <div class="warning">병원 안내가 필요할 때 위치 권한과 Kakao REST API 키가 있어야 주변 병원을 찾습니다.</div>
+  </section>
+
+  <main id="log"></main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const log = $("log");
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let sessionId = crypto.randomUUID();
+let locationValue = null;
+let recognition = null;
+let listening = false;
+let activeSource = null;
+let pendingSpeech = 0;
+let askStartedAt = 0;
+let currentMeta = null;
+const clientConfigPromise = fetch("/client-config")
+  .then((response) => response.ok ? response.json() : {})
+  .catch(() => ({}));
+let kakaoSdkPromise = null;
+let leafletPromise = null;
+
+
+function addBubble(kind, text = "") {
+  const bubble = document.createElement("div");
+  bubble.className = "bubble " + kind;
+  const body = document.createElement("span");
+  body.textContent = text;
+  bubble.appendChild(body);
+  log.appendChild(bubble);
+  window.scrollTo(0, document.body.scrollHeight);
+  return { bubble, body };
+}
+
+function showSystem(text) {
+  addBubble("a", text);
+}
+
+if (!SpeechRecognition) {
+  showSystem("이 브라우저는 음성 인식을 지원하지 않습니다. Chrome 또는 Edge에서 localhost로 접속하세요.");
+  $("mic").disabled = true;
+}
+
+let koreanVoice = null;
+function selectVoice() {
+  koreanVoice = speechSynthesis.getVoices().find((voice) =>
+    (voice.lang || "").toLowerCase().startsWith("ko")
+  ) || null;
+}
+selectVoice();
+speechSynthesis.onvoiceschanged = selectVoice;
+async function requestMicrophonePermission() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    return { ok: false, message: "마이크 권한 API를 지원하지 않는 브라우저입니다." };
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach((track) => track.stop());
+    return { ok: true, message: "마이크 허용됨" };
+  } catch (error) {
+    return { ok: false, message: "마이크가 거부되었습니다. 브라우저 주소창에서 다시 허용할 수 있습니다." };
+  }
+}
+
+function requestLocationPermission({ announceError = true } = {}) {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) {
+      const result = { ok: false, message: "위치 기능을 지원하지 않는 브라우저입니다." };
+      if (announceError) showSystem(result.message);
+      resolve(result);
+      return;
+    }
+    $("location").textContent = "위치 확인 중…";
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        locationValue = { lat: position.coords.latitude, lng: position.coords.longitude };
+        $("location").textContent = "위치 준비됨";
+        $("location").classList.add("ready");
+        resolve({ ok: true, message: "위치 허용됨" });
+      },
+      (error) => {
+        $("location").textContent = "위치 사용";
+        const result = { ok: false, message: "위치를 가져오지 못했습니다: " + error.message };
+        if (announceError) showSystem(result.message);
+        resolve(result);
+      },
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
+    );
+  });
+}
+
+
+function maybeResumeListening() {
+  if (pendingSpeech === 0 && $("continuous").checked && !activeSource) startListening();
+}
+
+function speak(text) {
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = "ko-KR";
+  utterance.rate = 1.08;
+  if (koreanVoice) utterance.voice = koreanVoice;
+  pendingSpeech++;
+  utterance.onstart = () => {
+    if (currentMeta && currentMeta.dataset.started !== "1") {
+      currentMeta.dataset.started = "1";
+      currentMeta.textContent = `첫 음성 ${Math.round(performance.now() - askStartedAt)}ms`;
+    }
+  };
+  utterance.onend = utterance.onerror = () => {
+    pendingSpeech = Math.max(0, pendingSpeech - 1);
+    maybeResumeListening();
+  };
+  speechSynthesis.speak(utterance);
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
+  })[char]);
+}
+
+async function loadKakaoMaps() {
+  if (window.kakao?.maps) {
+    await new Promise((resolve) => window.kakao.maps.load(resolve));
+    return window.kakao.maps;
+  }
+  if (kakaoSdkPromise) return kakaoSdkPromise;
+  kakaoSdkPromise = (async () => {
+    const config = await clientConfigPromise;
+    if (!config.kakaoJsKey) throw new Error("KAKAO_JS_API_KEY가 설정되지 않았습니다.");
+    await new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(config.kakaoJsKey)}&autoload=false`;
+      script.onload = resolve;
+      script.onerror = () => reject(new Error("Kakao Maps SDK를 불러오지 못했습니다."));
+      document.head.appendChild(script);
+    });
+    await new Promise((resolve) => window.kakao.maps.load(resolve));
+    return window.kakao.maps;
+  })();
+  return kakaoSdkPromise;
+}
+
+async function loadLeaflet() {
+  if (window.L?.map) return window.L;
+  if (leafletPromise) return leafletPromise;
+  leafletPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    script.integrity = "sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=";
+    script.crossOrigin = "";
+    script.onload = () => resolve(window.L);
+    script.onerror = () => reject(new Error("대체 지도 라이브러리를 불러오지 못했습니다."));
+    document.head.appendChild(script);
+  });
+  return leafletPromise;
+}
+
+async function renderLeafletMap(container, items) {
+  const L = await loadLeaflet();
+  const center = [Number(items[0].lat), Number(items[0].lng)];
+  const map = L.map(container, { zoomControl: true }).setView(center, 14);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  }).addTo(map);
+  const bounds = [];
+  for (const item of items) {
+    const point = [Number(item.lat), Number(item.lng)];
+    L.marker(point).addTo(map).bindPopup(`<strong>${escapeHtml(item.name)}</strong><br>${escapeHtml(item.address || "")}`);
+    bounds.push(point);
+  }
+  if (bounds.length > 1) map.fitBounds(bounds, { padding: [28, 28] });
+  container.dataset.provider = "openstreetmap";
+  container.title = `Kakao 지도 도메인 인증 실패로 대체 지도를 표시했습니다. Kakao Developers에 ${location.origin}을 등록하세요.`;
+  setTimeout(() => map.invalidateSize(), 0);
+}
+async function renderHospitalMap(container, items) {
+  const valid = items.filter((item) => Number.isFinite(Number(item.lat)) && Number.isFinite(Number(item.lng)));
+  if (valid.length === 0) {
+    container.classList.add("map-fallback");
+    container.textContent = "지도에 표시할 좌표가 없습니다.";
+    return;
+  }
+  try {
+    const maps = await loadKakaoMaps();
+    const first = new maps.LatLng(Number(valid[0].lat), Number(valid[0].lng));
+    const map = new maps.Map(container, { center: first, level: 5 });
+    const bounds = new maps.LatLngBounds();
+    for (const item of valid) {
+      const position = new maps.LatLng(Number(item.lat), Number(item.lng));
+      const marker = new maps.Marker({ map, position, title: item.name });
+      const info = new maps.InfoWindow({
+        content: `<div style="padding:7px 9px;font-size:13px;white-space:nowrap">${escapeHtml(item.name)}</div>`,
+      });
+      maps.event.addListener(marker, "click", () => info.open(map, marker));
+      bounds.extend(position);
+    }
+    map.setBounds(bounds);
+    map.relayout();
+  } catch (kakaoError) {
+    console.warn("Kakao Maps unavailable; using OpenStreetMap fallback.", kakaoError);
+    try {
+      await renderLeafletMap(container, valid);
+    } catch (fallbackError) {
+      console.error("Fallback map unavailable.", fallbackError);
+      container.classList.add("map-fallback");
+      container.textContent = `지도를 불러오지 못했습니다. Kakao Developers의 JavaScript SDK 도메인에 ${location.origin}을 등록해 주세요.`;
+    }
+  }
+}
+
+function renderHospitals(items) {
+  if (!Array.isArray(items) || items.length === 0) return;
+  const results = document.createElement("section");
+  results.className = "hospital-results";
+  const map = document.createElement("div");
+  map.className = "hospital-map";
+  map.setAttribute("aria-label", "추천 병원 위치 지도");
+  const list = document.createElement("div");
+  list.className = "hospitals";
+  for (const item of items.slice(0, 5)) {
+    const card = document.createElement("div");
+    card.className = "hospital";
+    const link = document.createElement("a");
+    link.textContent = item.name;
+    link.href = item.placeUrl || `https://map.kakao.com/link/map/${encodeURIComponent(item.name)},${item.lat},${item.lng}`;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    const detail = document.createElement("small");
+    const distance = Number.isFinite(item.distanceM) ? ` · ${Math.round(item.distanceM)}m` : "";
+    detail.textContent = `${item.address}${distance}${item.phone ? " · " + item.phone : ""}`;
+    card.append(link, detail);
+    list.appendChild(card);
+  }
+  results.append(map, list);
+  log.appendChild(results);
+  renderHospitalMap(map, items.slice(0, 5));
+}
+
+function stopCurrentTurn() {
+  if (activeSource) {
+    activeSource.close();
+    activeSource = null;
+  }
+  speechSynthesis.cancel();
+  pendingSpeech = 0;
+}
+
+function ask(question) {
+  const trimmed = question.trim();
+  if (!trimmed) return;
+  stopCurrentTurn();
+  askStartedAt = performance.now();
+  addBubble("u", trimmed);
+  const { bubble, body } = addBubble("a");
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  meta.textContent = "근거와 프로필 확인 중…";
+  bubble.appendChild(meta);
+  currentMeta = meta;
+
+  const params = new URLSearchParams({
+    q: trimmed,
+    childId: $("child").value,
+    sid: sessionId,
+  });
+  if (locationValue) {
+    params.set("lat", String(locationValue.lat));
+    params.set("lng", String(locationValue.lng));
+  }
+
+  let answer = "";
+  const source = new EventSource("/ask?" + params);
+  activeSource = source;
+  source.addEventListener("meta", (event) => {
+    const data = JSON.parse(event.data);
+    if (data.emergency) bubble.classList.add("emg");
+  });
+  source.addEventListener("delta", (event) => {
+    answer += JSON.parse(event.data).text;
+    body.textContent = answer;
+    window.scrollTo(0, document.body.scrollHeight);
+  });
+  source.addEventListener("sentence", (event) => speak(JSON.parse(event.data).text));
+  source.addEventListener("tool", (event) => {
+    const data = JSON.parse(event.data);
+    meta.textContent = data.summary;
+    renderHospitals(data.hospitals);
+  });
+  source.addEventListener("done", (event) => {
+    const data = JSON.parse(event.data);
+    source.close();
+    if (activeSource === source) activeSource = null;
+    if (data.error) {
+      meta.textContent = "오류: " + data.error;
+      body.textContent ||= "응답을 완료하지 못했습니다.";
+      return;
+    }
+    if (!answer && data.answer) body.textContent = data.answer;
+    if (meta.dataset.started !== "1") meta.textContent = data.toolTrace?.length
+      ? "사용 도구: " + data.toolTrace.join(", ")
+      : "응답 완료";
+    maybeResumeListening();
+  });
+  source.onerror = () => {
+    source.close();
+    if (activeSource === source) activeSource = null;
+    meta.textContent = "연결이 끊겼습니다.";
+  };
+}
+
+function startListening() {
+  if (!SpeechRecognition || listening) return;
+  // 답변 중 말하기를 누르면 음성을 끊고 새 질문을 받는다.
+  if (activeSource || speechSynthesis.speaking) stopCurrentTurn();
+  recognition = new SpeechRecognition();
+  recognition.lang = "ko-KR";
+  recognition.interimResults = true;
+  recognition.continuous = false;
+  recognition.maxAlternatives = 1;
+  let finalText = "";
+
+  recognition.onstart = () => {
+    listening = true;
+    $("mic").classList.add("listening");
+    $("mic").textContent = "말 끝내기";
+    $("live").textContent = "듣는 중…";
+  };
+  recognition.onresult = (event) => {
+    finalText = "";
+    let interimText = "";
+    for (let index = 0; index < event.results.length; index++) {
+      const text = event.results[index][0].transcript;
+      if (event.results[index].isFinal) finalText += text;
+      else interimText += text;
+    }
+    $("live").textContent = finalText || interimText || "듣는 중…";
+  };
+  recognition.onerror = (event) => {
+    if (!["no-speech", "aborted"].includes(event.error)) showSystem("음성 인식 오류: " + event.error);
+  };
+  recognition.onend = () => {
+    listening = false;
+    $("mic").classList.remove("listening");
+    $("mic").textContent = "말하기";
+    const question = finalText.trim();
+    $("live").textContent = question || "대기 중";
+    if (question) ask(question);
+  };
+  recognition.start();
+}
+
+function stopListening() {
+  if (recognition && listening) recognition.stop();
+}
+
+$("mic").onclick = () => listening ? stopListening() : startListening();
+$("reset").onclick = async () => {
+  stopCurrentTurn();
+  stopListening();
+  await fetch("/reset?sid=" + encodeURIComponent(sessionId));
+  sessionId = crypto.randomUUID();
+  log.innerHTML = "";
+  $("live").textContent = "대기 중";
+  showSystem("새 상담을 시작합니다. 가장 불편한 증상부터 말씀해 주세요.");
+};
+$("child").onchange = () => $("reset").click();
+$("location").onclick = () => requestLocationPermission();
+$("consentLater").onclick = () => {
+  $("consentModal").hidden = true;
+};
+$("consentAccept").onclick = async () => {
+  const button = $("consentAccept");
+  const status = $("consentStatus");
+  button.disabled = true;
+  status.textContent = "마이크 권한을 확인하고 있습니다…";
+  const microphone = await requestMicrophonePermission();
+  status.textContent = microphone.message + " · 위치 권한을 확인하고 있습니다…";
+  const location = await requestLocationPermission({ announceError: false });
+  status.textContent = microphone.message + " · " + location.message;
+  setTimeout(() => {
+    $("consentModal").hidden = true;
+    button.disabled = false;
+    if (microphone.ok) startListening();
+  }, 900);
+};
+requestAnimationFrame(() => $("consentAccept").focus());
+</script>
+</body>
+</html>

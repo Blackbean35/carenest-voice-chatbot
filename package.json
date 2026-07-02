@@ -1,0 +1,22 @@
+{
+  "name": "voice-b-realtime-rag-tools",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "저지연 음성 의료 문진 프로토타입(Web Speech + streaming LLM + RAG + profile tools + Kakao hospital search)",
+  "scripts": {
+    "serve": "tsx src/server.ts",
+    "demo": "tsx scripts/demo.ts",
+    "chat": "tsx scripts/chat.ts",
+    "typecheck": "tsc --noEmit",
+    "test:offline": "tsx scripts/offline-smoke.ts"
+  },
+  "dependencies": {
+    "openai": "^4.71.0"
+  },
+  "devDependencies": {
+    "dotenv": "^16.4.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}
