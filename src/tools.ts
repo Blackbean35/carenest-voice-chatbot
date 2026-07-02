@@ -42,12 +42,11 @@ export const CHAT_TOOLS: ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "update_user_profile",
-      description: "사용자가 이번 대화에서 명시적으로 확인한 정보만 현재 아이 프로필에 저장한다. 추론한 정보는 저장하지 않는다.",
+      description:
+        "사용자가 이번 대화에서 명시적으로 확인한 안정적 정보(체중·알레르기·복용약·기저질환)만 현재 아이 프로필에 저장한다. 추론한 정보나 생년월일·성별 같은 식별 정보는 저장하지 않는다.",
       parameters: {
         type: "object",
         properties: {
-          birthDate: { type: "string", description: "YYYY-MM-DD" },
-          sex: { type: "string", enum: ["male", "female"] },
           underlyingConditions: { type: "array", items: { type: "string" } },
           allergies: { type: "array", items: { type: "string" } },
           medications: { type: "array", items: { type: "string" } },
@@ -109,8 +108,6 @@ export async function executeTool(name: string, rawArguments: string, context: T
     const evidence = String(args.evidence || "").trim();
     if (!evidence) throw new Error("프로필 변경에는 사용자 발화 근거가 필요합니다.");
     const allowed = [
-      "birthDate",
-      "sex",
       "underlyingConditions",
       "allergies",
       "medications",

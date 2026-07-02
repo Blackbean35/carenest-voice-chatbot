@@ -100,7 +100,7 @@ export async function streamTurn(
 
   const evidence = relevant.length
     ? relevant.map((item, index) => `(${index + 1}) [${item.source}] ${item.text}`).join("\n")
-    : "(관련 근거 없음 ? 일반론을 단정하지 말고 필요한 정보를 먼저 질문)";
+    : "(관련 근거 없음 — 일반론을 단정하지 말고 필요한 정보를 먼저 질문)";
   const system = [
     TRIAGE_SYSTEM,
     `[아이 정보] ${profileNote || "선택된 프로필 없음"}`,

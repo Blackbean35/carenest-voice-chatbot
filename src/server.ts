@@ -26,8 +26,21 @@ async function main() {
   }
 
   const brain = await createBrain();
+  // LRU 세션 스토어: Map의 삽입 순서를 이용해 가장 오래 미사용된 세션부터 제거한다.
+  // (프로토타입용 인메모리 저장소. 실제 앱에서는 TTL 있는 외부 세션 스토어로 교체)
   const sessions = new Map<string, ConvoMessage[]>();
   const MAX_HISTORY = 20;
+  const MAX_SESSIONS = 500;
+
+  const touchSession = (sid: string, history: ConvoMessage[]) => {
+    sessions.delete(sid);
+    sessions.set(sid, history);
+    while (sessions.size > MAX_SESSIONS) {
+      const oldest = sessions.keys().next().value;
+      if (oldest === undefined) break;
+      sessions.delete(oldest);
+    }
+  };
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url || "/", `http://localhost:${PORT}`);
@@ -103,7 +116,7 @@ async function main() {
 
       try {
         const result = await streamTurn(brain, { question, childId, history, location, signal: abort.signal }, sink);
-        sessions.set(
+        touchSession(
           sid,
           [
             ...history,
